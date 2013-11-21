@@ -9,7 +9,7 @@ from __future__ import print_function, unicode_literals
 
 import re
 
-from nltk.tree import Tree
+from nltk.tree import Tree, SVTree
 from nltk.tag.util import str2tuple
 from nltk.compat import python_2_unicode_compatible
 
@@ -292,6 +292,107 @@ class ChunkScore(object):
                 ("    Recall:       %5.1f%%\n" % (self.recall()*100))+
                 ("    F-Measure:    %5.1f%%" % (self.f_measure()*100)))
 
+        
+import numpy
+from collections import defaultdict
+#from __future__ import division
+class SV_Stats():
+    """Holder class for routines used to collect stats about SVTrees."""
+    def __init__(self):
+        pass
+
+    def chunk_count(self, tree):
+        return len(tree)
+
+    def sb_index(self, tree):
+        """Return index of subject chunk in tree with one sb."""
+        index = -1
+        if not isinstance(tree, SVTree):
+            raise ValueError("Tree must be instance of SVTree")
+        if not tree.label() == 'S':
+            raise ValueError("Tree must be root of sentence tree")
+        for chunkno, chunk in enumerate(tree):
+            if not isinstance(chunk, SVTree):
+                continue
+            if chunk.gram_role() == 'sb':
+                index = chunkno
+        if index < 0:
+            raise RuntimeError("Unable to find subject in \n%s" % tree.pprint())
+        return index
+
+    def vb_index(self, tree):
+        """Return index of verb chunk in tree with one vb."""
+        index = -1
+        if not isinstance(tree, SVTree):
+            raise ValueError("Tree must be instance of SVTree")
+        if not tree.label() == 'S':
+            raise ValueError("Tree must be root of sentence tree")
+        for chunkno, chunk in enumerate(tree):
+            if not isinstance(chunk, SVTree):
+                continue
+            if chunk.gram_role() == 'vb':
+                index = chunkno
+        if index < 0:
+            raise RuntimeError("Unable to find verb in \n%s" % tree.pprint())
+        return index
+
+    def sv_sep(self, tree):
+        """Return degree of separation between subject and verb (vb - sb)."""
+        return self.vb_index(tree) - self.sb_index(tree)
+
+    def sep_range(self, trees):
+        """Return range of sv_sep in trees."""
+        low = min([self.sv_sep(t) for t in trees])
+        high = max([self.sv_sep(t) for t in trees])
+        return (low, high + 1)
+
+    def max_chunk_count(self, trees):
+        """Return max number chunks in a sentence from list of sentences."""
+        maxcount = 0
+        for treeno, tree in enumerate(trees):
+            if not isinstance(tree, SVTree):
+                raise ValueError("Tree %d is not SVTree." % treeno)
+            maxcount = max(maxcount, self.chunk_count(tree))
+        return maxcount
+
+    def chunk_counts(self, trees):
+        """Return numpy array: element i = no. trees containing i chunks."""
+        v = numpy.array([0 for c in range(self.max_chunk_count(trees) + 1)])
+        for treeno, tree in enumerate(trees):
+            if not isinstance(tree, SVTree):
+                raise ValueError("Tree %d is not SVTree." % treeno)
+            v[self.chunk_count(tree)] += 1
+        return v
+
+    def sb_indices(self, trees):
+        """Return numpy array: element i = no. trees with sb at ith chunk."""
+        v = numpy.array([0 for c in range(self.max_chunk_count(trees))])
+        for treeno, tree in enumerate(trees):
+            if not isinstance(tree, SVTree):
+                raise ValueError("Tree %d is not SVTree." % treeno)
+            v[self.sb_index(tree)] += 1
+        return v
+
+    def vb_indices(self, trees):
+        """Return numpy array: element i = no. trees with vb at ith chunk."""
+        v = numpy.array([0 for c in range(self.max_chunk_count(trees))])
+        for treeno, tree in enumerate(trees):
+            if not isinstance(tree, SVTree):
+                raise ValueError("Tree %d is not SVTree." % treeno)
+            v[self.vb_index(tree)] += 1
+        return v
+
+    def sv_seps(self, trees):
+        """Return array indexed sep_range representing no. sentences with sv_sep i."""
+        v = defaultdict(int)
+        for i in range(*self.sep_range(trees)): v[i]
+        for treeno, tree in enumerate(trees):
+            if not isinstance(tree, SVTree):
+                raise ValueError("Tree %d is not SVTrees." % treeno)
+            v[self.sv_sep(tree)] += 1
+        return dict(v)
+
+
 # extract chunks, and assign unique id, the absolute position of
 # the first word of the chunk
 def _chunksets(t, count, chunk_label):
@@ -403,6 +504,77 @@ def conllstr2tree(s, chunk_types=('NP', 'PP', 'VP'), root_label="S"):
         stack[-1].append((word, tag))
 
     return stack[0]
+
+
+_LINE_RE_PLUS = re.compile('(\S+)\s+(\S+)\s+([IOB])-?(\S+)?\s+(\S+)')
+def conllstrplus2tree(s, chunk_types=('NP', 'PP', 'VP'), top_node="S"):
+    """
+    Return a chunk structure for a single sentence
+    encoded in the given CONLL 2000 style string.
+    This function converts a CoNLL IOB string into a tree.
+    It uses the specified chunk types
+    (defaults to NP, PP and VP), and creates a tree rooted at a node
+    labeled S (by default).
+
+    :param s: The CoNLL string to be converted.
+    :type s: str
+    :param chunk_types: The chunk types to be converted.
+    :type chunk_types: tuple
+    :param top_node: The node label to use for the root.
+    :type top_node: str
+    :rtype: Tree
+    """
+
+    stack = [SVTree(top_node, None, [])]
+
+    for lineno, line in enumerate(s.split('\n')):
+        if not line.strip(): continue
+
+        # Decode the line.
+        match = None
+        gram_role = None
+        if len(line.split()) == 4:
+            match = _LINE_RE_PLUS.match(line)
+            if match is None:
+                raise ValueError('Error on line %d' % lineno)
+            (word, tag, state, chunk_type, gram_role) = match.groups()
+        else:
+            match = _LINE_RE.match(line)
+            if match is None:
+                raise ValueError('Error on line %d' % lineno)
+            (word, tag, state, chunk_type) = match.groups()
+
+        #print("Line %d:" % (lineno))
+        #print(match.groups())
+
+        # If it's a chunk type we don't care about, treat it as O.
+        if (chunk_types is not None and
+            chunk_type not in chunk_types):
+            state = 'O'
+
+        # For "Begin"/"Outside", finish any completed chunks -
+        # also do so for "Inside" which don't match the previous token.
+        mismatch_I = state == 'I' and chunk_type != stack[-1].label()
+        if state in 'BO' or mismatch_I:
+            if len(stack) == 2: stack.pop()
+
+        # For "Begin", start a new chunk.
+        if state == 'B' or mismatch_I:
+            chunk = SVTree(chunk_type, None, [])
+            stack[-1].append(chunk)
+            stack.append(chunk)
+
+        # Add the new word token.
+        stack[-1].append((word, tag))
+
+        # If a grammar role is indicated, label chunk
+        if gram_role is not None:
+            if state == 'O':
+                raise ValueError('Error on line %d: non-chunk words cannot take grammar role\n%s' % (lineno, s))
+            stack[-1].set_gram_role(gram_role)
+
+    return stack[0]
+
 
 def tree2conlltags(t):
     """

@@ -776,6 +776,87 @@ class Tree(list):
                                     " ".join(childstrs), parens[1])
 
 
+@python_2_unicode_compatible
+class SVTree(Tree):
+    def __init__(self, node_or_str, gram_role=None, children=None):
+        super(SVTree, self).__init__(node_or_str, children)
+        #Tree.__init__(self, node_or_str, children)
+        self._gram_role = gram_role
+
+    def gram_role(self):
+        return self._gram_role
+
+    def set_gram_role(self, gr):
+        if not isinstance(gr, string_types):
+            raise ValueError("Grammar role must be string type")
+        self._gram_role = gr
+        #print("gram_role set to %s" % (self._gram_role))
+
+    def __repr__(self):
+        return self.pprint()
+
+    def pprint(self, margin=70, indent=0, nodesep='', parens='()', quotes=False):
+        """
+        :return: A pretty-printed string representation of this tree.
+        :rtype: str
+        :param margin: The right margin at which to do line-wrapping.
+        :type margin: int
+        :param indent: The indentation level at which printing
+            begins.  This number is used to decide how far to indent
+            subsequent lines.
+        :type indent: int
+        :param nodesep: A string that is used to separate the node
+            from the children.  E.g., the default value ``':'`` gives
+            trees like ``(S: (NP: I) (VP: (V: saw) (NP: it)))``.
+        """
+
+        # Try writing it on one line.
+        s = self._pprint_flat(nodesep, parens, quotes)
+        if len(s)+indent < margin:
+            return s
+
+        # If it doesn't fit on one line, then write it on multi-lines.
+        if isinstance(self._label, string_types) and isinstance(self._gram_role, string_types):
+            s = '%s%s-%s%s' % (parens[0], self._label, self._gram_role, nodesep)
+        elif isinstance(self._label, string_types):
+            s = '%s%s%s' % (parens[0], self._label, nodesep)
+        else:
+            s = '%s%s%s' % (parens[0], unicode_repr(self._label), nodesep)
+        for child in self:
+            if isinstance(child, SVTree):
+                s += '\n'+' '*(indent+2)+child.pprint(margin, indent+2,
+                                                  nodesep, parens, quotes)
+            elif isinstance(child, tuple):
+                s += '\n'+' '*(indent+2)+ "/".join(child)
+            elif isinstance(child, string_types) and not quotes:
+                s += '\n'+' '*(indent+2)+ '%s' % child
+            else:
+                s += '\n'+' '*(indent+2)+ unicode_repr(child)
+        return s+parens[1]
+
+    def _pprint_flat(self, nodesep, parens, quotes):
+        childstrs = []
+        for child in self:
+            if isinstance(child, SVTree):
+                childstrs.append(child._pprint_flat(nodesep, parens, quotes))
+            elif isinstance(child, tuple):
+                childstrs.append("/".join(child))
+            elif isinstance(child, string_types) and not quotes:
+                childstrs.append('%s' % child)
+            else:
+                childstrs.append(unicode_repr(child))
+        if isinstance(self._label, string_types) and isinstance(self._gram_role, string_types):
+            return '%s%s-%s%s %s%s' % (parens[0], self._label, self._gram_role, nodesep,
+                                    " ".join(childstrs), parens[1])
+        elif isinstance(self._label, string_types):
+            return '%s%s%s %s%s' % (parens[0], self._label, nodesep,
+                                    " ".join(childstrs), parens[1])
+        else:
+            return '%s%s%s %s%s' % (parens[0], unicode_repr(self._label), nodesep,
+                                    " ".join(childstrs), parens[1])
+    
+
+
 class ImmutableTree(Tree):
     def __init__(self, node_or_str, children=None):
         super(ImmutableTree, self).__init__(node_or_str, children)
