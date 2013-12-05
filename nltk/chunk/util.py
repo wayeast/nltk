@@ -483,6 +483,7 @@ class SV_Stats():
 
     def update(self, priors, tree):
         post = priors.copy(deep=True)
+        #post = pandas.DataFrame(priors)
         for si in post:
             for vi in post[si].index:
                 segment = tree[si-1:vi] if si<vi else tree[vi-1:si]
