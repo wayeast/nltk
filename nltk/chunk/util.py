@@ -295,19 +295,50 @@ class ChunkScore(object):
         
 import numpy
 from collections import defaultdict
+import itertools
 from scipy import stats as stats
 import pandas
+from collections import defaultdict
 class SV_Stats():
     """Holder class for routines used to collect stats about SVTrees."""
     def __init__(self, trees):
+        # Ratios over training set
         self._sb_ratios = [(self.sb_index(t) + 1) / (self.chunk_count(t)) for t in trees]
         self._vb_ratios = [(self.vb_index(t) + 1) / (self.chunk_count(t)) for t in trees]
+        # Beta functions from ratios
         pars = stats.beta.fit(self._sb_ratios)
         self._sb_alpha = pars[0]
         self._sb_beta  = pars[1]
         pars = stats.beta.fit(self._vb_ratios)
         self._vb_alpha = pars[0]
         self._vb_beta  = pars[1]
+        # transition probability matrix
+        trans = defaultdict(int)
+        tot_trans = 0.0
+        labels = set()
+        for tree in trees:
+            si = self.sb_index(tree)
+            vi = self.vb_index(tree)
+            if si < vi: segment = tree[si:vi+1]
+            else: segment = tree[vi:si+1]
+            fromch = segment[0]
+            labels.add(fromch.label() if isinstance(fromch, Tree) else '<other>')
+            for chunk in segment[1:]:
+                toch = chunk
+                fromlabel = fromch.label() if isinstance(fromch, Tree) else '<other>'
+                tolabel   = toch.label() if isinstance(toch, Tree) else '<other>'
+                labels.add(tolabel)
+                trans[(fromlabel, tolabel)] += 1
+                tot_trans += 1
+                fromch = toch
+        for c in itertools.product(labels, repeat=2):
+            if c not in trans.keys():
+                trans[c] = 0.5
+                tot_trans += .5
+        self.trans_prob = pandas.DataFrame(index=sorted(labels), columns=sorted(labels))
+        for fromk, tok in itertools.product(labels, repeat=2):
+            self.trans_prob[fromk][tok] = trans[(fromk, tok)] / tot_trans
+
 
     def chunk_count(self, tree):
         return len(tree)
@@ -425,8 +456,10 @@ class SV_Stats():
         priors = pandas.DataFrame(index=vps, columns=nps)
         for np in nps:
             for vp in vps:
-                np_prob = stats.beta.cdf(np / chs, self._sb_alpha, self._sb_beta) - stats.beta.cdf((np-1) / chs, self._sb_alpha, self._sb_beta)
-                vp_prob = stats.beta.cdf(vp / chs, self._vb_alpha, self._vb_beta) - stats.beta.cdf((vp-1) / chs, self._vb_alpha, self._vb_beta)
+                np_prob = stats.beta.cdf(np / chs, self._sb_alpha, self._sb_beta) - \
+                        stats.beta.cdf((np-1) / chs, self._sb_alpha, self._sb_beta)
+                vp_prob = stats.beta.cdf(vp / chs, self._vb_alpha, self._vb_beta) - \
+                        stats.beta.cdf((vp-1) / chs, self._vb_alpha, self._vb_beta)
                 priors[np][vp] = np_prob * vp_prob
                 #print("priors[{}][{}] = {}".format(np, vp, priors[np][vp]))
         norm = priors.sum().sum()
@@ -437,6 +470,23 @@ class SV_Stats():
                 priors[np][vp] = priors[np][vp] / norm
         return priors
 
+    def likelihood(self, segment):
+        likelihood = 1.0
+        fromch = segment[0]
+        for chunk in segment[1:]:
+            toch = chunk
+            fromlabel = fromch.label() if isinstance(fromch, Tree) else '<other>'
+            tolabel   = toch.label() if isinstance(toch, Tree) else '<other>'
+            likelihood *= self.trans_prob[fromlabel][tolabel]
+            fromch = toch
+        return likelihood
+
+    def update(self, priors, tree):
+        for si in priors:
+            for vi in priors[si].index:
+                segment = tree[si-1:vi] if si<vi else tree[vi-1:si]
+                priors[si][vi] *= self.likelihood(segment)
+        return priors
 
 
 
