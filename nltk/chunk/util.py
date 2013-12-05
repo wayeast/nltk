@@ -482,11 +482,12 @@ class SV_Stats():
         return likelihood
 
     def update(self, priors, tree):
-        for si in priors:
-            for vi in priors[si].index:
+        post = priors.copy(deep=True)
+        for si in post:
+            for vi in post[si].index:
                 segment = tree[si-1:vi] if si<vi else tree[vi-1:si]
-                priors[si][vi] *= self.likelihood(segment)
-        return priors
+                post[si][vi] *= self.likelihood(segment)
+        return post
 
 
 
