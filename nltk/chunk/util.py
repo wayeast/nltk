@@ -5,7 +5,7 @@
 #         Steven Bird <stevenbird1@gmail.com> (minor additions)
 # URL: <http://nltk.org/>
 # For license information, see LICENSE.TXT
-from __future__ import print_function, unicode_literals
+from __future__ import print_function, unicode_literals, division
 
 import re
 
@@ -295,11 +295,19 @@ class ChunkScore(object):
         
 import numpy
 from collections import defaultdict
-#from __future__ import division
+from scipy import stats as stats
+import pandas
 class SV_Stats():
     """Holder class for routines used to collect stats about SVTrees."""
-    def __init__(self):
-        pass
+    def __init__(self, trees):
+        self._sb_ratios = [(self.sb_index(t) + 1) / (self.chunk_count(t)) for t in trees]
+        self._vb_ratios = [(self.vb_index(t) + 1) / (self.chunk_count(t)) for t in trees]
+        pars = stats.beta.fit(self._sb_ratios)
+        self._sb_alpha = pars[0]
+        self._sb_beta  = pars[1]
+        pars = stats.beta.fit(self._vb_ratios)
+        self._vb_alpha = pars[0]
+        self._vb_beta  = pars[1]
 
     def chunk_count(self, tree):
         return len(tree)
@@ -391,6 +399,45 @@ class SV_Stats():
                 raise ValueError("Tree %d is not SVTrees." % treeno)
             v[self.sv_sep(tree)] += 1
         return dict(v)
+
+    def NP_indices(self, tree):
+        inds = list()
+        for chunkno, chunk in enumerate(tree, start=1):
+            if not isinstance(chunk, SVTree):
+                continue
+            if chunk.label() == u'NP':
+                inds.append(chunkno)
+        return inds
+
+    def VP_indices(self, tree):
+        inds = list()
+        for chunkno, chunk in enumerate(tree, start=1):
+            if not isinstance(chunk, SVTree):
+                continue
+            if chunk.label() == u'VP':
+                inds.append(chunkno)
+        return inds
+
+    def priors(self, tree):
+        nps = self.NP_indices(tree)
+        vps = self.VP_indices(tree)
+        chs = self.chunk_count(tree)
+        priors = pandas.DataFrame(index=vps, columns=nps)
+        for np in nps:
+            for vp in vps:
+                np_prob = stats.beta.cdf(np / chs, self._sb_alpha, self._sb_beta) - stats.beta.cdf((np-1) / chs, self._sb_alpha, self._sb_beta)
+                vp_prob = stats.beta.cdf(vp / chs, self._vb_alpha, self._vb_beta) - stats.beta.cdf((vp-1) / chs, self._vb_alpha, self._vb_beta)
+                priors[np][vp] = np_prob * vp_prob
+                #print("priors[{}][{}] = {}".format(np, vp, priors[np][vp]))
+        norm = priors.sum().sum()
+        #print("norm = {}".format(norm))
+        #priors.apply(lambda x : x / norm)
+        for np in nps:
+            for vp in vps:
+                priors[np][vp] = priors[np][vp] / norm
+        return priors
+
+
 
 
 # extract chunks, and assign unique id, the absolute position of
