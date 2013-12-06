@@ -306,12 +306,12 @@ class SV_Stats():
         self._sb_ratios = [(self.sb_index(t) + 1) / (self.chunk_count(t)) for t in trees]
         self._vb_ratios = [(self.vb_index(t) + 1) / (self.chunk_count(t)) for t in trees]
         # Beta functions from ratios
-        pars = stats.beta.fit(self._sb_ratios)
-        self._sb_alpha = pars[0]
-        self._sb_beta  = pars[1]
-        pars = stats.beta.fit(self._vb_ratios)
-        self._vb_alpha = pars[0]
-        self._vb_beta  = pars[1]
+        self._sb_alpha, self._sb_beta = stats.beta.fit(self._sb_ratios)[:2]
+        #self._sb_alpha = pars[0]
+        #self._sb_beta  = pars[1]
+        self._vb_alpha, self._vb_beta = stats.beta.fit(self._vb_ratios)[:2]
+        #self._vb_alpha = pars[0]
+        #self._vb_beta  = pars[1]
         # transition probability matrix
         trans = defaultdict(int)
         tot_trans = 0.0
@@ -319,8 +319,7 @@ class SV_Stats():
         for tree in trees:
             si = self.sb_index(tree)
             vi = self.vb_index(tree)
-            if si < vi: segment = tree[si:vi+1]
-            else: segment = tree[vi:si+1]
+            segment = tree[si:vi+1] if si < vi else tree[vi:si+1]
             fromch = segment[0]
             labels.add(fromch.label() if isinstance(fromch, Tree) else '<other>')
             for chunk in segment[1:]:
@@ -331,6 +330,7 @@ class SV_Stats():
                 trans[(fromlabel, tolabel)] += 1
                 tot_trans += 1
                 fromch = toch
+        # smooth out 0 values
         for c in itertools.product(labels, repeat=2):
             if c not in trans.keys():
                 trans[c] = 0.5
@@ -432,6 +432,7 @@ class SV_Stats():
         return dict(v)
 
     def NP_indices(self, tree):
+        """Return list of all indices (start=1) of NPs in tree."""
         inds = list()
         for chunkno, chunk in enumerate(tree, start=1):
             if not isinstance(chunk, SVTree):
@@ -441,6 +442,7 @@ class SV_Stats():
         return inds
 
     def VP_indices(self, tree):
+        """Return list of all indices (start=1) of VPs in tree."""
         inds = list()
         for chunkno, chunk in enumerate(tree, start=1):
             if not isinstance(chunk, SVTree):
@@ -450,6 +452,7 @@ class SV_Stats():
         return inds
 
     def priors(self, tree):
+        """Return dataframe of prior probabilities that NP:VP comnination == main sb:vb."""
         nps = self.NP_indices(tree)
         vps = self.VP_indices(tree)
         chs = self.chunk_count(tree)
@@ -461,16 +464,14 @@ class SV_Stats():
                 vp_prob = stats.beta.cdf(vp / chs, self._vb_alpha, self._vb_beta) - \
                         stats.beta.cdf((vp-1) / chs, self._vb_alpha, self._vb_beta)
                 priors[np][vp] = np_prob * vp_prob
-                #print("priors[{}][{}] = {}".format(np, vp, priors[np][vp]))
         norm = priors.sum().sum()
-        #print("norm = {}".format(norm))
-        #priors.apply(lambda x : x / norm)
         for np in nps:
             for vp in vps:
                 priors[np][vp] = priors[np][vp] / norm
         return priors
 
     def likelihood(self, segment):
+        """Return likelihood of segment of chunks."""
         likelihood = 1.0
         fromch = segment[0]
         for chunk in segment[1:]:
@@ -482,8 +483,8 @@ class SV_Stats():
         return likelihood
 
     def update(self, priors, tree):
+        """Return updated matrix == prior * likelihood(NP:VP segment of tree)."""
         post = priors.copy(deep=True)
-        #post = pandas.DataFrame(priors)
         for si in post:
             for vi in post[si].index:
                 segment = tree[si-1:vi] if si<vi else tree[vi-1:si]
