@@ -307,11 +307,7 @@ class SV_Stats():
         self._vb_ratios = [(self.vb_index(t) + 1) / (self.chunk_count(t)) for t in trees]
         # Beta functions from ratios
         self._sb_alpha, self._sb_beta = stats.beta.fit(self._sb_ratios)[:2]
-        #self._sb_alpha = pars[0]
-        #self._sb_beta  = pars[1]
         self._vb_alpha, self._vb_beta = stats.beta.fit(self._vb_ratios)[:2]
-        #self._vb_alpha = pars[0]
-        #self._vb_beta  = pars[1]
         # transition probability matrix
         trans = defaultdict(int)
         tot_trans = 0.0
@@ -451,24 +447,25 @@ class SV_Stats():
                 inds.append(chunkno)
         return inds
 
+    def priorprob(self, ind, chs, flag):
+        """Helper function for priors, to make things more readable."""
+        a = self._sb_alpha if flag == 'sb' else self._vb_alpha
+        b = self._sb_beta  if flag == 'sb' else self._vb_beta
+        return stats.beta.cdf(ind / chs, a, b) - stats.beta.cdf((ind-1) / chs, a, b)
+
     def priors(self, tree):
         """Return dataframe of prior probabilities that NP:VP comnination == main sb:vb."""
         nps = self.NP_indices(tree)
         vps = self.VP_indices(tree)
         chs = self.chunk_count(tree)
-        priors = pandas.DataFrame(index=vps, columns=nps)
-        for np in nps:
-            for vp in vps:
-                np_prob = stats.beta.cdf(np / chs, self._sb_alpha, self._sb_beta) - \
-                        stats.beta.cdf((np-1) / chs, self._sb_alpha, self._sb_beta)
-                vp_prob = stats.beta.cdf(vp / chs, self._vb_alpha, self._vb_beta) - \
-                        stats.beta.cdf((vp-1) / chs, self._vb_alpha, self._vb_beta)
-                priors[np][vp] = np_prob * vp_prob
+        v   = [ self.priorprob(vp, chs, 'vb') for vp in vps ]
+        sd  = { i : v for i in nps }
+        sbp = pandas.DataFrame(sd, index=vps)
+        s   = [ self.priorprob(np, chs, 'sb') for np in nps ]
+        vbp = pandas.Series(s, index=nps)
+        priors = pandas.DataFrame(sbp.mul(vbp), index=vps)
         norm = priors.sum().sum()
-        for np in nps:
-            for vp in vps:
-                priors[np][vp] = priors[np][vp] / norm
-        return priors
+        return priors.applymap(lambda x : x / norm)
 
     def likelihood(self, segment):
         """Return likelihood of segment of chunks."""
@@ -491,6 +488,11 @@ class SV_Stats():
                 post[si][vi] *= self.likelihood(segment)
         return post
 
+    def max_ind(self, mat):
+        """Return max index, as (col, row) for max value in mat."""
+        s = mat.unstack().copy()
+        s.sort()
+        return (s.index[-1][0] - 1, s.index[-1][1] - 1)
 
 
 # extract chunks, and assign unique id, the absolute position of
