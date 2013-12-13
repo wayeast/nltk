@@ -308,6 +308,8 @@ class SV_Stats():
         # Beta functions from ratios
         self._sb_alpha, self._sb_beta = stats.beta.fit(self._sb_ratios)[:2]
         self._vb_alpha, self._vb_beta = stats.beta.fit(self._vb_ratios)[:2]
+        # rudish prob dist by separations
+        self._sepprobs = self.rude_sepprob(trees)
         # transition probability matrix
         trans = defaultdict(int)
         tot_trans = 0.0
@@ -381,6 +383,16 @@ class SV_Stats():
         high = max([self.sv_sep(t) for t in trees])
         return (low, high + 1)
 
+    def rude_sepprob(self, trees):
+        seps = self.sv_seps(trees)
+        for k in range(-30,30):
+            if k not in seps.keys():
+                seps[k] = .25
+            if k in seps.keys() and seps[k] == 0 and k != 0:
+                seps[k] += 1
+        tot = sum(seps.values())
+        return pandas.Series( { i : seps[i] / tot for i in seps } )
+
     def max_chunk_count(self, trees):
         """Return max number chunks in a sentence from list of sentences."""
         maxcount = 0
@@ -419,7 +431,7 @@ class SV_Stats():
 
     def sv_seps(self, trees):
         """Return array indexed sep_range representing no. sentences with sv_sep i."""
-        v = defaultdict(int)
+        v = defaultdict(float)
         for i in range(*self.sep_range(trees)): v[i]
         for treeno, tree in enumerate(trees):
             if not isinstance(tree, SVTree):
@@ -486,6 +498,14 @@ class SV_Stats():
             for vi in post[si].index:
                 segment = tree[si-1:vi] if si<vi else tree[vi-1:si]
                 post[si][vi] *= self.likelihood(segment)
+        return post
+
+    def update_by_sep(self, priors, trees):
+        """Return updated matrix == prior * likelihood(NP:VP segment of tree)."""
+        post = priors.copy(deep=True)
+        for si in post:
+            for vi in post[si].index:
+                post[si][vi] *= self._sepprobs[vi - si]
         return post
 
     def max_ind(self, mat):
