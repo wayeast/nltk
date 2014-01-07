@@ -1,3 +1,20 @@
+NOTA
+----
+
+This fork of the NLTK source code was used as a base for a graduate class
+project whose aim was to predict the main subject and verb of a sentence using
+probabilistic modelling methods.  This is not the NLTK project; the NLTK code
+here is not up to date; see the text of the original NLTK README file below.
+
+Changes to the NLTK code base included here are primarily found in the files
+nltk/tree.py and nltk/chunk/util.py.  There have been some small additions
+elsewhere to get the module to initiate correctly.  In nltk/tree.py, see the class
+SVTree, which extends the regular NLTK class Tree to include a data member
+gram\_role.  In nltk/chunk/util.py, see the class SV\_Stats, which includes data
+and methods for calculating relative probabilities of subjects and verbs in
+sentences.
+
+
 Natural Language Toolkit (NLTK)   nltk.org
 ====================================
 
